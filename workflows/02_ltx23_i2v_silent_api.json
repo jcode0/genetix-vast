@@ -1,6 +1,4 @@
 {
-  "_comment": "LTX 2.3 i2v — single-pass, no audio decode. ~2x быстрее full workflow.",
-
   "269": {
     "inputs": {"image": "input.png"},
     "class_type": "LoadImage",

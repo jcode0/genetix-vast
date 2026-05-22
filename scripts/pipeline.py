@@ -51,8 +51,18 @@ def http_post_json(url: str, payload: dict) -> dict:
     req = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json"}, method="POST"
     )
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.loads(r.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"HTTP {e.code} {e.reason} on POST {url}\n--- response body ---\n{err_body}"
+        ) from e
 
 
 def http_get_json(url: str) -> dict:
