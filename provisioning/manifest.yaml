@@ -1,0 +1,77 @@
+# genetix-vast — FLUX 2 dev (T2I) + LTX 2.3 (I2V) provisioning manifest
+# Используется как PROVISIONING_MANIFEST на vastai/comfy:v0.18.2-cuda-12.9-py312
+#
+# Этот manifest НЕ использует extension provisioner_comfyui, поэтому ничего
+# лишнего из workflow JSON автоматически не подтянется. Загружается ровно то,
+# что перечислено ниже.
+
+version: 1
+
+settings:
+  venv: "/venv/main"
+
+apt_packages:
+  - aria2
+  - ffmpeg
+  - libsndfile1
+
+# Custom node для LTX 2.3 — обязателен для LTXV* нод в i2v workflow.
+git_repos:
+  - url: https://github.com/Lightricks/ComfyUI-LTXVideo
+    dest: ${WORKSPACE:-/workspace}/ComfyUI/custom_nodes/ComfyUI-LTXVideo
+    pull_if_exists: true
+    post_commands:
+      - "/venv/main/bin/pip install --no-cache-dir -r ${WORKSPACE:-/workspace}/ComfyUI/custom_nodes/ComfyUI-LTXVideo/requirements.txt || true"
+
+downloads:
+  # ======================================================================
+  # FLUX 2 dev (text-to-image) — Comfy-Org/flux2-dev fp8 split files
+  # ======================================================================
+  - url: https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/diffusion_models/flux2_dev_fp8mixed.safetensors
+    dest: ${WORKSPACE:-/workspace}/ComfyUI/models/diffusion_models/flux2_dev_fp8mixed.safetensors
+
+  - url: https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors
+    dest: ${WORKSPACE:-/workspace}/ComfyUI/models/vae/flux2-vae.safetensors
+
+  - url: https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_fp8.safetensors
+    dest: ${WORKSPACE:-/workspace}/ComfyUI/models/text_encoders/mistral_3_small_flux2_fp8.safetensors
+
+  # Turbo LoRA: позволяет генерить FLUX 2 за ~8 шагов вместо 32. Можно закомментить.
+  - url: https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/loras/Flux2TurboComfyv2.safetensors
+    dest: ${WORKSPACE:-/workspace}/ComfyUI/models/loras/Flux2TurboComfyv2.safetensors
+
+  # ======================================================================
+  # LTX 2.3 (image-to-video) — Lightricks/LTX-2.3 + Comfy-Org/ltx-2
+  # Это набор для video_ltx2_3_i2v.json. Audio-часть workflow можно
+  # обойти (Bypass) в UI, если нужен немой клип.
+  # ======================================================================
+  - url: https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-dev-fp8.safetensors
+    dest: ${WORKSPACE:-/workspace}/ComfyUI/models/checkpoints/ltx-2.3-22b-dev-fp8.safetensors
+
+  - url: https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled-lora-384.safetensors
+    dest: ${WORKSPACE:-/workspace}/ComfyUI/models/loras/ltx-2.3-22b-distilled-lora-384.safetensors
+
+  - url: https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/loras/gemma-3-12b-it-abliterated_lora_rank64_bf16.safetensors
+    dest: ${WORKSPACE:-/workspace}/ComfyUI/models/loras/gemma-3-12b-it-abliterated_lora_rank64_bf16.safetensors
+
+  - url: https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-spatial-upscaler-x2-1.1.safetensors
+    dest: ${WORKSPACE:-/workspace}/ComfyUI/models/latent_upscale_models/ltx-2.3-spatial-upscaler-x2-1.1.safetensors
+
+  - url: https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors
+    dest: ${WORKSPACE:-/workspace}/ComfyUI/models/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors
+
+  # ======================================================================
+  # Workflows — кладутся прямо в папку пользовательских workflow ComfyUI
+  # и появляются в сайдбаре Workflows → Browse.
+  # ======================================================================
+  - url: https://github.com/Comfy-Org/workflow_templates/raw/refs/heads/main/templates/image_flux2_fp8.json
+    dest: ${WORKSPACE:-/workspace}/ComfyUI/user/default/workflows/01_flux2_t2i.json
+
+  - url: https://github.com/Comfy-Org/workflow_templates/raw/refs/heads/main/templates/video_ltx2_3_i2v.json
+    dest: ${WORKSPACE:-/workspace}/ComfyUI/user/default/workflows/02_ltx23_i2v.json
+
+post_commands:
+  # Пересоздаём папку output (volume может быть пустым), создаём input.
+  - "mkdir -p ${WORKSPACE:-/workspace}/ComfyUI/input ${WORKSPACE:-/workspace}/ComfyUI/output"
+  # Перезапускаем ComfyUI, чтобы он подхватил custom_nodes и новые модели.
+  - "supervisorctl restart comfyui || true"
