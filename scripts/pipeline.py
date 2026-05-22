@@ -43,6 +43,7 @@ CLIENT_ID = str(uuid.uuid4())
 WORKFLOWS_DIR = Path(__file__).resolve().parent.parent / "workflows"
 FLUX_WORKFLOW_PATH = WORKFLOWS_DIR / "01_flux2_t2i_api.json"
 LTX_WORKFLOW_PATH = WORKFLOWS_DIR / "02_ltx23_i2v_api.json"
+LTX_SILENT_WORKFLOW_PATH = WORKFLOWS_DIR / "02_ltx23_i2v_silent_api.json"
 
 
 def http_post_json(url: str, payload: dict) -> dict:
@@ -127,6 +128,22 @@ def collect_outputs(history_entry: dict, kind: str) -> list[dict]:
     return items
 
 
+VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mkv", ".gif")
+
+
+def collect_video_outputs(history_entry: dict) -> list[dict]:
+    """ComfyUI SaveVideo может класть mp4 в ключи 'videos', 'gifs' или даже 'images'.
+    Возвращаем все элементы, имя которых заканчивается на видео-расширение."""
+    found: list[dict] = []
+    for node_outputs in history_entry.get("outputs", {}).values():
+        for key in ("videos", "gifs", "images"):
+            for v in node_outputs.get(key, []) or []:
+                fn = (v.get("filename") or "").lower()
+                if fn.endswith(VIDEO_EXTS):
+                    found.append(v)
+    return found
+
+
 def download_file(base: str, item: dict, dest_dir: Path) -> Path:
     """Скачивает файл (image/video) с /view?filename=...&subfolder=...&type=output."""
     params = urllib.parse.urlencode(
@@ -197,29 +214,33 @@ def run_ltx(base: str, args, image_local: Path, out_dir: Path) -> Path:
     uploaded_name = upload_image_to_comfy(base, image_local)
     print(f"[LTX] uploaded image as: {uploaded_name}")
 
-    wf = load_workflow(LTX_WORKFLOW_PATH)
+    wf_path = LTX_SILENT_WORKFLOW_PATH if args.silent else LTX_WORKFLOW_PATH
+    wf = load_workflow(wf_path)
+    print(f"[LTX] workflow: {wf_path.name}")
     wf["269"]["inputs"]["image"] = uploaded_name
     wf["320:319"]["inputs"]["value"] = args.ltx_prompt
     seed1 = args.seed if args.seed is not None else random.randint(0, 2**31 - 1)
-    seed2 = (seed1 + 1) & 0x7FFFFFFF
     wf["320:276"]["inputs"]["noise_seed"] = seed1
-    wf["320:277"]["inputs"]["noise_seed"] = seed2
+    if not args.silent:
+        seed2 = (seed1 + 1) & 0x7FFFFFFF
+        wf["320:277"]["inputs"]["noise_seed"] = seed2
     wf["320:312"]["inputs"]["value"] = args.video_width
     wf["320:299"]["inputs"]["value"] = args.video_height
     wf["320:300"]["inputs"]["value"] = args.fps
     wf["320:301"]["inputs"]["value"] = args.duration
     wf["75"]["inputs"]["filename_prefix"] = f"video/{args.tag}"
 
+    seed_info = f"seed={seed1}" if args.silent else f"seeds=({seed1},{(seed1 + 1) & 0x7FFFFFFF})"
     print(
         f"[LTX] prompt: {args.ltx_prompt!r}\n"
-        f"[LTX] size={args.video_width}x{args.video_height} fps={args.fps} duration={args.duration}s seeds=({seed1},{seed2})"
+        f"[LTX] size={args.video_width}x{args.video_height} fps={args.fps} duration={args.duration}s {seed_info}"
     )
     pid = queue_prompt(base, wf)
     print(f"[LTX] prompt_id={pid}, ждём ", end="", flush=True)
     entry = wait_for_prompt(base, pid, timeout_s=60 * 60)
     print(" done")
 
-    vids = collect_outputs(entry, "videos") or collect_outputs(entry, "gifs")
+    vids = collect_video_outputs(entry)
     if not vids:
         raise RuntimeError(f"LTX не вернул video. entry={entry}")
     v = vids[0]
@@ -246,6 +267,13 @@ def main() -> int:
     p.add_argument("--out", default="./out", help="Локальная папка для скачанных результатов")
     p.add_argument("--skip-flux", action="store_true", help="Не запускать FLUX, использовать --image вместо этого")
     p.add_argument("--image", default=None, help="Готовая картинка (если --skip-flux)")
+    p.add_argument(
+        "--with-audio",
+        dest="silent",
+        action="store_false",
+        help="Использовать полный 2-pass workflow с генерацией аудио (медленнее ~2x)",
+    )
+    p.set_defaults(silent=True)
     args = p.parse_args()
 
     out_dir = Path(args.out)
