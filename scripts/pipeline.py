@@ -262,7 +262,7 @@ def run_ltx(base: str, args, image_local: Path, out_dir: Path) -> Path:
 def main() -> int:
     p = argparse.ArgumentParser(description="FLUX 2 dev -> LTX 2.3 i2v pipeline")
     p.add_argument("--base", default=COMFY_DEFAULT_BASE, help=f"ComfyUI API base (default {COMFY_DEFAULT_BASE})")
-    p.add_argument("--flux-prompt", required=True, help="Промпт для FLUX 2 dev (стартовое изображение)")
+    p.add_argument("--flux-prompt", default="", help="Промпт для FLUX 2 dev (стартовое изображение). Не нужен при --skip-flux.")
     p.add_argument("--ltx-prompt", required=True, help="Промпт для LTX 2.3 i2v (как оживить кадр)")
     p.add_argument("--width", type=int, default=1024, help="FLUX width")
     p.add_argument("--height", type=int, default=1024, help="FLUX height")
@@ -298,6 +298,9 @@ def main() -> int:
             print(f"Файл {img_local} не найден", file=sys.stderr)
             return 2
     else:
+        if not args.flux_prompt:
+            print("--flux-prompt обязателен (или используйте --skip-flux --image PATH)", file=sys.stderr)
+            return 2
         img_local = run_flux(args.base, args, out_dir)
 
     video_local = run_ltx(args.base, args, img_local, out_dir)
